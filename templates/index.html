@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PDF Q&A</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 720px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      color: #111;
+    }
+
+    /* Upload area */
+    .upload-area {
+      background: white;
+      border: 2px dashed #ddd;
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .upload-area:hover { border-color: #888; }
+    .upload-area.loaded { border-color: #22c55e; border-style: solid; background: #f0fdf4; }
+
+    .upload-area input[type="file"] { display: none; }
+
+    .upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .upload-label { font-size: 15px; color: #555; }
+    .upload-label span { color: #2563eb; text-decoration: underline; cursor: pointer; }
+    .upload-status { font-size: 14px; color: #16a34a; font-weight: 500; margin-top: 8px; }
+
+    /* Chat area */
+    .chat-box {
+      background: white;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      height: 420px;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .message.user {
+      align-self: flex-end;
+      background: #2563eb;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .message.assistant {
+      align-self: flex-start;
+      background: #f3f4f6;
+      color: #111;
+      border-bottom-left-radius: 4px;
+    }
+    .message.system {
+      align-self: center;
+      background: none;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .input-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-row input:focus { border-color: #2563eb; }
+    .input-row input:disabled { background: #f9fafb; }
+
+    .input-row button {
+      padding: 10px 18px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .input-row button:hover { background: #1d4ed8; }
+    .input-row button:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .thinking {
+      align-self: flex-start;
+      color: #9ca3af;
+      font-size: 13px;
+      font-style: italic;
+      padding: 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📄 PDF Q&A</h1>
+
+    <!-- Upload -->
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+      <input type="file" id="fileInput" accept=".pdf" onchange="uploadPDF(this)"/>
+      <div class="upload-icon">📁</div>
+      <div class="upload-label">Drop a PDF here or <span>browse</span></div>
+      <div class="upload-status" id="uploadStatus"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-box">
+      <div class="messages" id="messages">
+        <div class="message system">Upload a PDF to start asking questions</div>
+      </div>
+      <div class="input-row">
+        <input
+          type="text"
+          id="questionInput"
+          placeholder="Ask a question about the PDF..."
+          disabled
+          onkeydown="if(event.key==='Enter') askQuestion()"
+        />
+        <button id="askBtn" onclick="askQuestion()" disabled>Ask</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let pdfLoaded = false;
+
+    async function uploadPDF(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      const statusEl = document.getElementById('uploadStatus');
+      const uploadArea = document.getElementById('uploadArea');
+      statusEl.textContent = 'Uploading...';
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (res.ok) {
+          statusEl.textContent = `✓ ${data.message} (${data.chunks} chunks, ${data.words} words)`;
+          uploadArea.classList.add('loaded');
+          pdfLoaded = true;
+          document.getElementById('questionInput').disabled = false;
+          document.getElementById('askBtn').disabled = false;
+          document.getElementById('questionInput').focus();
+          addMessage('system', `PDF loaded: ${file.name}. Ask me anything about it!`);
+        } else {
+          statusEl.textContent = `✗ ${data.error}`;
+        }
+      } catch (err) {
+        statusEl.textContent = '✗ Upload failed. Is the server running?';
+      }
+    }
+
+    async function askQuestion() {
+      if (!pdfLoaded) return;
+
+      const input = document.getElementById('questionInput');
+      const question = input.value.trim();
+      if (!question) return;
+
+      input.value = '';
+      addMessage('user', question);
+
+      const thinking = document.createElement('div');
+      thinking.className = 'thinking';
+      thinking.textContent = 'Thinking...';
+      document.getElementById('messages').appendChild(thinking);
+      scrollToBottom();
+
+      document.getElementById('askBtn').disabled = true;
+      input.disabled = true;
+
+      try {
+        const res = await fetch('/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question })
+        });
+        const data = await res.json();
+        thinking.remove();
+        addMessage('assistant', data.answer || data.error);
+      } catch (err) {
+        thinking.remove();
+        addMessage('assistant', 'Error connecting to server.');
+      } finally {
+        document.getElementById('askBtn').disabled = false;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    function addMessage(role, text) {
+      const el = document.createElement('div');
+      el.className = `message ${role}`;
+      el.textContent = text;
+      document.getElementById('messages').appendChild(el);
+      scrollToBottom();
+    }
+
+    function scrollToBottom() {
+      const msgs = document.getElementById('messages');
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+  </script>
+</body>
+</html>
